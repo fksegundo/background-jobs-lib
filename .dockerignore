@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+data/
+acceptance/.tmp/
+workflow/
+.git/

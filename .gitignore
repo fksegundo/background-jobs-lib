@@ -1,4 +1,11 @@
-### .NET\nbin/\nobj/\n### acceptance artifacts\nacceptance/.tmp/\ndata/\n
+### .NET
+bin/
+obj/
+
+### demo data / acceptance artifacts
+data/
+acceptance/.tmp/
+
 ### python
 __pycache__/
 *.pyc
