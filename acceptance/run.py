@@ -597,20 +597,26 @@ def s10(env):
     t_stop = utcnow()
 
     rjid, pjid = running["jobId"], pending["jobId"]
-    fin = [e for e in last_events if e.get("jobId") == rjid and e["type"] == "finished"]
-    require(fin and fin[0]["detail"].get("outcome") == "ok",
-            f"running job did not finish during drain: {fin}")
-    require(not any(e.get("jobId") == pjid for e in last_events),
+    # HTTP stops accepting connections when shutdown starts, so events during
+    # the drain are unobservable — the drain proof comes from persisted
+    # timestamps after restart.
+    require(not any(e.get("jobId") == pjid and e.get("type") == "started"
+                    for e in last_events),
             "pending job started during shutdown")
 
     env.restart(worker_count=1)
     pj = wait_state(api, pjid, "succeeded", timeout=30)
-    rj = api.job(rjid)[1]
+    st, rj = api.job(rjid)
+    require(st == 200, f"running job detail -> {st}")
+    r_attempts = rj["attemptHistory"]
 
-    # post-restart proof from persisted timestamps (DB clock):
-    # running job finished before the stop; pending job's first attempt
-    # started only after the process went down and came back.
-    r_fin = parse_at(rj["attemptHistory"][0]["finishedAt"])
+    # Post-restart proof (DB clock): the running job's attempt finished as
+    # succeeded BEFORE the process went down — i.e. the drain waited for it.
+    # If the process had been SIGKILLed, the attempt would read 'interrupted'
+    # and the job would show a second attempt.
+    require(len(r_attempts) == 1 and r_attempts[0]["outcome"] == "succeeded",
+            f"running job attempts: {r_attempts}")
+    r_fin = parse_at(r_attempts[0]["finishedAt"])
     p_start = parse_at(pj["attemptHistory"][0]["startedAt"])
     slack = timedelta(seconds=1.0)  # host/DB clock skew allowance
     require(r_fin <= t_stop + slack,

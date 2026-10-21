@@ -8,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 
 var connectionString =
     Environment.GetEnvironmentVariable("JOBS_DB")
-    ?? "Host=localhost;Port=5432;Database=jobs;Username=jobs;Password=jobs";
+    ?? "Host=localhost;Port=15432;Database=jobs;Username=jobs;Password=jobs";
 
 var builder = Host.CreateApplicationBuilder(args);
 var registry = builder.Services.AddBackgroundJobs(o =>

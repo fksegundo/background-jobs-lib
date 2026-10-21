@@ -208,7 +208,10 @@ internal sealed class JobStore
                 await tx.RollbackAsync(ct).ConfigureAwait(false);
                 return;
             }
-            finishedAt = (DateTimeOffset)res;
+            // timestamptz scalar reads come back as DateTime (Kind=Utc).
+            finishedAt = res is DateTimeOffset dto
+                ? dto
+                : new DateTimeOffset(DateTime.SpecifyKind((DateTime)res, DateTimeKind.Utc));
         }
 
         string nextState;
@@ -307,7 +310,12 @@ internal sealed class JobStore
             SELECT MIN(scheduled_at) FROM background_jobs.jobs WHERE state = 'scheduled';
             """;
         var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return res is DateTimeOffset dto ? dto : null;
+        return res switch
+        {
+            DateTimeOffset dto => dto,
+            DateTime dt => new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc)),
+            _ => null,
+        };
     }
 
     /// <summary>

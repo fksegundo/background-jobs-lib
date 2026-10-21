@@ -105,20 +105,36 @@ internal sealed class JobEngine : BackgroundService
     {
         // Dedicated unpooled connection: the session-level advisory lock must
         // never leak into a pool, and its lifetime equals this process's.
-        var csb = new NpgsqlConnectionStringBuilder(_options.ConnectionString) { Pooling = false };
-        var conn = new NpgsqlConnection(csb.ConnectionString);
-        await conn.OpenAsync(ct).ConfigureAwait(false);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pg_try_advisory_lock(@key)";
-        cmd.Parameters.AddWithValue("key", OwnerLockKey);
-        var got = (bool)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
-        if (!got)
+        var csb = new NpgsqlConnectionStringBuilder(_options.ConnectionString)
         {
+            Pooling = false,
+            Timeout = 5,
+        };
+
+        // Postgres may still be initializing (fresh volume, slow start):
+        // retry the connect, but fail fast on lock contention.
+        for (var i = 0; ; i++)
+        {
+            var conn = new NpgsqlConnection(csb.ConnectionString);
+            try
+            {
+                await conn.OpenAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception) when (i < 30 && !ct.IsCancellationRequested)
+            {
+                await conn.DisposeAsync().ConfigureAwait(false);
+                await Task.Delay(1000, ct).ConfigureAwait(false);
+                continue;
+            }
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT pg_try_advisory_lock(@key)";
+            cmd.Parameters.AddWithValue("key", OwnerLockKey);
+            var got = (bool)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+            if (got) return conn;
             await conn.DisposeAsync().ConfigureAwait(false);
             throw new InvalidOperationException(
                 "another executor already holds this job storage; only one executor is supported");
         }
-        return conn;
     }
 
     private async Task OwnerWatchdogAsync(CancellationToken ct)
