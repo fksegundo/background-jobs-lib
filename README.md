@@ -1,9 +1,21 @@
 # Background Jobs Library
 
+> [Versão em português](README.pt-BR.md)
+
+> **Note:** this repository is a study project — it was built to evaluate
+> development workflows with AI agents (specification, planning, oracle-first
+> validation, implementation). It is not hardened for production use; treat it
+> as a reference implementation, not as a dependency to ship.
+
 .NET background-jobs library + demo HTTP app. Jobs are persisted in Postgres,
 claimed atomically (`SELECT ... FOR UPDATE SKIP LOCKED`), executed in-process
 by a bounded worker pool, retried with a fixed delay, and recovered after an
 abrupt kill. Workers wake via `LISTEN/NOTIFY` plus a timed fallback.
+
+## Documentation
+
+Detailed docs in [`docs/`](docs/README.md): architecture, data model and the
+full API reference.
 
 ## Layout
 
