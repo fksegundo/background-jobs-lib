@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: jobs
+      POSTGRES_USER: jobs
+      POSTGRES_PASSWORD: jobs
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ${DATA_DIR:-./data}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobs -d jobs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  demo:
+    build:
+      context: .
+      dockerfile: demo/BackgroundJobs.Demo/Dockerfile
+    environment:
+      PORT: "8080"
+      WORKER_COUNT: "${WORKER_COUNT:-4}"
+      ConnectionStrings__Jobs: "Host=postgres;Port=5432;Database=jobs;Username=jobs;Password=jobs"
+    ports:
+      - "${DEMO_PORT:-18080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 120s
+    restart: "no"

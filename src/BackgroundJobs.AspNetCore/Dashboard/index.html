@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background Jobs</title>
+<style>
+  :root { --bg:#0f1420; --panel:#182033; --border:#2a3550; --text:#dbe4f5; --muted:#8494b3;
+          --ok:#3fb96f; --err:#e35d6a; --warn:#e0a93e; --run:#4f8ff7; --del:#7c8aa5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
+         background:var(--bg); color:var(--text); }
+  header { padding:14px 20px; border-bottom:1px solid var(--border); display:flex;
+           align-items:center; gap:14px; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  #health { margin-left:auto; font-size:12px; }
+  #health.ok { color:var(--ok); } #health.down { color:var(--err); }
+  .counters { display:flex; gap:10px; padding:14px 20px; flex-wrap:wrap; }
+  .counter { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+             padding:8px 14px; cursor:pointer; min-width:110px; }
+  .counter.sel { outline:2px solid var(--run); }
+  .counter .n { font-size:20px; font-weight:700; }
+  .counter .s { font-size:11px; color:var(--muted); text-transform:uppercase; }
+  main { display:flex; gap:14px; padding:0 20px 20px; align-items:flex-start; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; }
+  table { border-collapse:collapse; width:100%; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border);
+          font-size:12px; white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; }
+  tr.job { cursor:pointer; } tr.job:hover { background:#1f2a44; }
+  .st { font-weight:700; }
+  .st.succeeded{color:var(--ok)} .st.failed{color:var(--err)} .st.deleted{color:var(--del)}
+  .st.processing{color:var(--run)} .st.scheduled{color:var(--warn)} .st.enqueued{color:#b39df5}
+  #list { flex:2 1 560px; overflow:auto; }
+  #detail { flex:1 1 380px; padding:12px 14px; min-width:340px; }
+  #detail h2 { font-size:13px; margin:4px 0 8px; color:var(--muted); }
+  #detail pre { background:#0c111c; border:1px solid var(--border); border-radius:6px;
+                padding:8px; overflow:auto; font-size:12px; max-height:220px; }
+  button.act { background:var(--run); color:#fff; border:0; border-radius:6px;
+               padding:6px 12px; margin:4px 6px 4px 0; cursor:pointer; font:inherit; }
+  button.act.del { background:var(--err); }
+  button.act:disabled { opacity:.4; cursor:default; }
+  #events { margin:0 20px 20px; padding:10px 14px; }
+  #events div { padding:2px 0; font-size:12px; border-bottom:1px dotted var(--border); }
+  .toast { position:fixed; right:16px; bottom:16px; background:var(--panel);
+           border:1px solid var(--err); border-radius:8px; padding:10px 14px; display:none; }
+  .dim { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Background Jobs</h1>
+  <span id="health" class="down">unavailable</span>
+</header>
+<div class="counters" id="counters"></div>
+<main>
+  <div class="panel" id="list">
+    <table>
+      <thead><tr><th>id</th><th>name</th><th>state</th><th>attempts</th><th>updated</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="panel" id="detail"><span class="dim">select a job</span></div>
+</main>
+<div class="panel" id="events"><h2 class="dim" style="margin:0 0 6px;font-size:13px">observable events</h2><div id="evrows"></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const EVENTS_URL = "__EVENTS_URL__";
+const STATES = ["scheduled","enqueued","processing","succeeded","failed","deleted"];
+let filter = null, selected = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = t => t ? new Date(t).toISOString().replace("T"," ").replace("Z","") : "—";
+const toast = m => { const t=document.getElementById("toast");
+  t.textContent=m; t.style.display="block"; setTimeout(()=>t.style.display="none",4000); };
+
+async function api(method, url) {
+  const r = await fetch(url, { method });
+  let body = null; try { body = await r.json(); } catch {}
+  return { status: r.status, body };
+}
+
+async function refresh() {
+  const [h, l] = await Promise.all([
+    api("GET","/health"), api("GET","/api/jobs")]);
+  const he = document.getElementById("health");
+  const up = h.status===200;
+  he.textContent = up ? "server ok" : "unavailable";
+  he.className = up ? "ok" : "down";
+  if (l.status!==200) return;
+  const items = l.body.items || [];
+  const counts = Object.fromEntries(STATES.map(s=>[s,0]));
+  items.forEach(j=>counts[j.state]++);
+  document.getElementById("counters").innerHTML = STATES.map(s=>
+    `<div class="counter ${filter===s?'sel':''}" onclick="setFilter('${s}')">
+       <div class="n">${counts[s]}</div><div class="s">${s}</div></div>`).join("")
+    + `<div class="counter ${filter===null?'sel':''}" onclick="setFilter(null)">
+       <div class="n">${items.length}</div><div class="s">all</div></div>`;
+  const shown = filter ? items.filter(j=>j.state===filter) : items;
+  document.getElementById("rows").innerHTML = shown.map(j=>
+    `<tr class="job" onclick="select('${j.id}')">
+      <td>${esc(j.id.slice(0,8))}</td><td>${esc(j.name)}</td>
+      <td class="st ${j.state}">${j.state}</td><td>${j.attempts}</td></tr>`).join("");
+  if (selected) loadDetail(selected);
+  const ev = await api("GET", EVENTS_URL);
+  if (ev.status===200) {
+    document.getElementById("evrows").innerHTML = (ev.body.items||[]).slice(-60).map(e=>
+      `<div><span class="dim">${fmt(e.at)}</span> ${esc(e.type)} job ${esc(String(e.jobId).slice(0,8))} attempt ${e.attempt} ${esc(JSON.stringify(e.detail))}</div>`
+    ).join("");
+  }
+}
+
+async function select(id){ selected=id; loadDetail(id); }
+
+async function loadDetail(id){
+  const r = await api("GET","/api/jobs/"+id);
+  const d = document.getElementById("detail");
+  if (r.status!==200){ d.innerHTML='<span class="dim">job not found</span>'; return; }
+  const j = r.body;
+  const canDel = ["scheduled","enqueued"].includes(j.state);
+  const canReq = ["succeeded","failed","deleted"].includes(j.state);
+  d.innerHTML =
+    `<h2>job ${esc(j.id)}</h2>
+     <div><b>${esc(j.name)}</b> <span class="st ${j.state}">${j.state}</span>
+       attempts ${j.attempts}/${j.maxAttempts} retry ${j.retryDelayMs}ms</div>
+     <div class="dim">created ${fmt(j.createdAt)} · updated ${fmt(j.updatedAt)}
+       · scheduledAt ${fmt(j.scheduledAt)}</div>
+     <div>
+       <button class="act del" ${canDel?"":"disabled"} onclick="act('${j.id}','DELETE','')">delete</button>
+       <button class="act" ${canReq?"":"disabled"} onclick="act('${j.id}','POST','/requeue')">requeue</button>
+     </div>
+     <h2>args</h2><pre>${esc(JSON.stringify(j.args,null,2))}</pre>
+     <h2>history</h2><pre>${esc(j.history.map(h=>`${fmt(h.at)}  ${h.state}  ${h.reason}`).join("\n"))}</pre>
+     <h2>attempts</h2><pre>${esc(j.attemptHistory.map(a=>
+        `#${a.attempt} ${fmt(a.startedAt)} → ${fmt(a.finishedAt)} ${a.outcome||"running"}${a.error?" · "+a.error:""}`).join("\n"))}</pre>`;
+}
+
+async function act(id, method, suffix){
+  const r = await api(method, "/api/jobs/"+id+suffix);
+  if (r.status>=400) toast((r.body&&r.body.error)||("HTTP "+r.status));
+  refresh();
+}
+
+function setFilter(s){ filter=s; refresh(); }
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

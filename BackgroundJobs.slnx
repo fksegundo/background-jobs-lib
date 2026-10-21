@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/BackgroundJobs/BackgroundJobs.csproj" />
+  <Project Path="src/BackgroundJobs.AspNetCore/BackgroundJobs.AspNetCore.csproj" />
+  <Project Path="demo/BackgroundJobs.Demo/BackgroundJobs.Demo.csproj" />
+  <Project Path="examples/BackgroundJobs.Console/BackgroundJobs.Console.csproj" />
+  <Project Path="tests/BackgroundJobs.Tests/BackgroundJobs.Tests.csproj" />
+</Solution>
